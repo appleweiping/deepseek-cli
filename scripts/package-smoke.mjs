@@ -41,7 +41,7 @@ try {
     : join(temp, "node_modules", ".bin", "deepseek");
 
   const version = spawn(bin, ["--version"], { cwd: temp, shell: process.platform === "win32" });
-  assert.match(version.stdout, /0\.3\.0/);
+  assert.match(version.stdout, /0\.4\.0/);
 
   const doctor = spawn(bin, ["--json", "--doctor"], {
     cwd: temp,
@@ -52,7 +52,7 @@ try {
   assert.equal(payload.ok, true);
   assert.equal(payload.auth.api_key, "configured");
   assert.equal(payload.auth.source, "env:DEEPSEEK_API_KEY");
-  assert.equal(payload.version, "0.3.0");
+  assert.equal(payload.version, "0.4.0");
   assert.equal(payload.endpoint.host, "api.deepseek.com");
   assert.equal(payload.base_url, undefined);
 

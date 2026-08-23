@@ -6,14 +6,16 @@
  *   1. Constitution (base.md)        — compile-time constant
  *   2. Runtime-switching guidance     — constant
  *   3. Project instructions           — workspace-static (<instructions> blocks)
- *   4. User memory block              — session-stable
- *   5. Handoff relay                  — volatile (rewritten on /handoff and /compact)
+ *   4. Repository map                 — workspace-static, bounded orientation
+ *   5. User memory block              — session-stable
+ *   6. Handoff relay                  — volatile (rewritten on /handoff and /compact)
  * The latest user message + tool results are appended by the agent loop after
  * this prompt, so they never bust the cached prefix.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, lstatSync, realpathSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { assertWritablePath, isInsidePath } from "../safety/sandbox.js";
 
 let cachedBase: string | null = null;
 
@@ -48,6 +50,7 @@ function constitutionCandidates(): string[] {
 export interface PromptZones {
   runtimeGuidance?: string;
   projectInstructions?: { source: string; content: string }[];
+  repositoryMap?: string;
   skills?: string;
   memory?: string;
   handoff?: string;
@@ -65,6 +68,10 @@ export function assembleSystemPrompt(zones: PromptZones): string {
   for (const inst of zones.projectInstructions ?? []) {
     const body = inst.content.slice(0, 100_000); // guard against pathological files
     parts.push(`<instructions source="${escapeAttr(inst.source)}">\n${body}\n</instructions>`);
+  }
+
+  if (zones.repositoryMap?.trim()) {
+    parts.push(zones.repositoryMap.trim());
   }
 
   // Skills catalog (workspace-static): progressive disclosure, before memory.
@@ -104,7 +111,7 @@ export function handoffPath(workspace: string): string {
 export function readHandoff(workspace: string): string | undefined {
   const p = handoffPath(workspace);
   try {
-    if (existsSync(p)) {
+    if (safeWorkspaceFile(p, workspace)) {
       const text = readFileSync(p, "utf-8").trim();
       return text || undefined;
     }
@@ -116,6 +123,7 @@ export function readHandoff(workspace: string): string | undefined {
 
 export function writeHandoff(workspace: string, content: string): string {
   const p = handoffPath(workspace);
+  assertWritablePath(p, workspace);
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, content.trim() + "\n", "utf-8");
   return p;
@@ -132,6 +140,7 @@ export function discoverProjectInstructions(workspace: string): { source: string
   for (const p of names) {
     try {
       if (existsSync(p)) {
+        if (!safeWorkspaceFile(p, workspace)) continue;
         const content = readFileSync(p, "utf-8").trim();
         if (content) out.push({ source: relativeName(workspace, p), content });
       }
@@ -140,6 +149,16 @@ export function discoverProjectInstructions(workspace: string): { source: string
     }
   }
   return out;
+}
+
+function safeWorkspaceFile(path: string, workspace: string): boolean {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    return isInsidePath(realpathSync(path), realpathSync(workspace));
+  } catch {
+    return false;
+  }
 }
 
 function relativeName(workspace: string, p: string): string {

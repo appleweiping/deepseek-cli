@@ -138,7 +138,9 @@ function isSymlinkish(p: string): boolean {
 
 /** Recursively detect any symbolic link within a tree (depth-bounded). */
 function containsSymlink(dir: string, depth = 0): boolean {
-  if (depth > 12) return false;
+  // Fail closed on pathological depth: an uninspected subtree is not safe to
+  // install merely because it exceeded our traversal budget.
+  if (depth > 32) return true;
   let entries: string[];
   try {
     entries = readdirSync(dir);

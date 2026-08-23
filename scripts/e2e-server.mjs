@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Agent as HttpAgent, request as httpRequest } from "node:http";
 
 const { startRuntimeApi } = await import("../src/server/runtime-api.ts");
 
@@ -22,6 +23,8 @@ try {
   const hbody = await health.json();
   assert.equal(hbody.ok, true, "health ok");
   assert.equal(hbody.service, "weiping-whale", "service name");
+  assert.equal(health.headers.get("cache-control"), "no-store", "JSON responses are not cached");
+  assert.equal(health.headers.get("x-content-type-options"), "nosniff", "JSON responses disable MIME sniffing");
 
   // 2. /v1 without token -> 401.
   const noAuth = await fetch(`${root}/v1/cost`);
@@ -70,7 +73,55 @@ try {
 
   // 7b. GET on stream is no longer supported (must be POST).
   const sseGet = await fetch(`${root}/v1/stream?message=hi`, { headers: auth });
-  assert.equal(sseGet.status, 404, "GET /v1/stream -> 404 (POST only)");
+  assert.equal(sseGet.status, 405, "GET /v1/stream -> 405 (POST only)");
+  assert.equal(sseGet.headers.get("allow"), "POST");
+
+  // 7c. Malformed JSON and oversized bodies have distinct, stable responses.
+  const malformed = await fetch(`${root}/v1/message`, {
+    method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: "{not-json",
+  });
+  assert.equal(malformed.status, 400, "malformed JSON -> 400");
+  const oversized = await fetch(`${root}/v1/message`, {
+    method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "x".repeat(1_000_001) }),
+  });
+  assert.equal(oversized.status, 413, "oversized body -> 413 without connection reset");
+
+  // 400/405/413 responses must leave a fully consumed connection reusable.
+  // This catches paused IncomingMessage bodies that look fine to fetch() but
+  // strand the next request on a single-socket keep-alive agent.
+  const keepAlive = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+  try {
+    const malformedRaw = await rawRequest(root, keepAlive, api.token, "POST", "/v1/message", "{bad-json");
+    assert.equal(malformedRaw.status, 400);
+    const after400 = await rawRequest(root, keepAlive, api.token, "GET", "/v1/cost");
+    assert.equal(after400.status, 200);
+    assert.equal(after400.reusedSocket, true, "connection is reusable after 400");
+
+    const wrongMethod = await rawRequest(root, keepAlive, api.token, "PUT", "/v1/message", "x".repeat(200_000));
+    assert.equal(wrongMethod.status, 405);
+    const after405 = await rawRequest(root, keepAlive, api.token, "GET", "/v1/cost");
+    assert.equal(after405.status, 200);
+    assert.equal(after405.reusedSocket, true, "connection is reusable after a body-bearing 405");
+
+    const oversizedRaw = await rawRequest(
+      root,
+      keepAlive,
+      api.token,
+      "POST",
+      "/v1/message",
+      JSON.stringify({ message: "x".repeat(1_000_001) }),
+    );
+    assert.equal(oversizedRaw.status, 413);
+    const after413 = await rawRequest(root, keepAlive, api.token, "GET", "/v1/cost");
+    assert.equal(after413.status, 200);
+    assert.equal(after413.reusedSocket, true, "connection is reusable after 413");
+  } finally {
+    keepAlive.destroy();
+  }
 
   // 8. unknown path -> 404.
   const nf = await fetch(`${root}/nope`);
@@ -83,4 +134,35 @@ try {
   console.log("server e2e ok");
 } finally {
   await api.close();
+}
+
+function rawRequest(root, agent, token, method, path, body = "") {
+  const target = new URL(path, root);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: target.hostname,
+      port: target.port,
+      path: target.pathname + target.search,
+      method,
+      agent,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    });
+    const timer = setTimeout(() => req.destroy(new Error(`timed out: ${method} ${path}`)), 5_000);
+    req.on("response", (res) => {
+      res.resume();
+      res.on("end", () => {
+        clearTimeout(timer);
+        resolve({ status: res.statusCode, reusedSocket: req.reusedSocket });
+      });
+    });
+    req.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    req.end(body);
+  });
 }

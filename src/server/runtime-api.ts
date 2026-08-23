@@ -19,6 +19,7 @@ import { randomBytes, timingSafeEqual } from "crypto";
 import type { Agent } from "../agent.js";
 import type { CostTracker } from "../cost.js";
 import { VERSION } from "../runtime/version.js";
+import { safeErrorMessage } from "../runtime/safe-text.js";
 
 export interface RuntimeApiOptions {
   host?: string;
@@ -99,26 +100,26 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: RuntimeAp
 
   // Health is unauthenticated and minimal.
   if (path === "/health" && req.method === "GET") {
-    return sendJson(res, 200, { ok: true, service: "weiping-whale", version: VERSION });
+    return drainAndSendJson(req, res, 200, { ok: true, service: "weiping-whale", version: VERSION });
   }
 
   // Everything under /v1 requires a valid bearer token.
   if (path.startsWith("/v1")) {
     if (!checkAuth(req, token)) {
-      return sendJson(res, 401, { error: "unauthorized" });
+      return drainAndSendJson(req, res, 401, { error: "unauthorized" });
     }
   } else {
-    return sendJson(res, 404, { error: "not found" });
+    return drainAndSendJson(req, res, 404, { error: "not found" });
   }
 
   if (path === "/v1/cost" && req.method === "GET") {
-    return sendJson(res, 200, deps.costTracker.snapshot());
+    return drainAndSendJson(req, res, 200, deps.costTracker.snapshot());
   }
 
   if (path === "/v1/message" && req.method === "POST") {
     const body = await readBody(req);
-    if (body === null) return sendJson(res, 413, { error: "request body invalid or too large" });
-    const message = typeof body?.message === "string" ? body.message : "";
+    if (!body.ok) return sendJson(res, body.status, { error: body.error });
+    const message = typeof body.value?.message === "string" ? body.value.message : "";
     if (!message.trim()) return sendJson(res, 400, { error: "message is required" });
     if (!state.tryAcquire()) return sendJson(res, 429, { error: "too many in-flight turns" });
     try {
@@ -133,15 +134,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: RuntimeAp
   // never lands in access logs / shell history.
   if (path === "/v1/stream" && req.method === "POST") {
     const body = await readBody(req);
-    if (body === null) return sendJson(res, 413, { error: "request body invalid or too large" });
-    const message = typeof body?.message === "string" ? body.message : "";
+    if (!body.ok) return sendJson(res, body.status, { error: body.error });
+    const message = typeof body.value?.message === "string" ? body.value.message : "";
     if (!message.trim()) return sendJson(res, 400, { error: "message is required" });
     if (state.sseCount >= MAX_SSE_CONNECTIONS) return sendJson(res, 429, { error: "too many open streams" });
     if (!state.tryAcquire()) return sendJson(res, 429, { error: "too many in-flight turns" });
     return streamTurn(res, req, deps, message.slice(0, MAX_MESSAGE_CHARS), state);
   }
 
-  return sendJson(res, 404, { error: "not found" });
+  if (path === "/v1/message" || path === "/v1/stream" || path === "/v1/cost") {
+    res.setHeader("Allow", path === "/v1/cost" ? "GET" : "POST");
+    return drainAndSendJson(req, res, 405, { error: "method not allowed" });
+  }
+  return drainAndSendJson(req, res, 404, { error: "not found" });
 }
 
 /** Constant-time bearer token check (scheme is case-insensitive per RFC 7235). */
@@ -170,7 +175,9 @@ async function streamTurn(
   state.sseCount += 1;
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-cache, no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Accel-Buffering": "no",
     Connection: "keep-alive",
   });
   const sse = (event: string, data: unknown) => {
@@ -196,7 +203,7 @@ async function streamTurn(
       sse("done", { ok: true });
     }
   } catch (err: any) {
-    if (!clientGone) sse("error", { error: String(err?.message ?? err) });
+    if (!clientGone) sse("error", { error: safeErrorMessage(err) });
   } finally {
     clearInterval(ping);
     state.release();
@@ -205,12 +212,17 @@ async function streamTurn(
   }
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
+type BodyResult =
+  | { ok: true; value: any }
+  | { ok: false; status: 400 | 413; error: string };
+
+function readBody(req: IncomingMessage): Promise<BodyResult> {
   return new Promise((resolve) => {
     let size = 0;
     const chunks: Buffer[] = [];
     let settled = false;
-    const done = (v: any) => {
+    let tooLarge = false;
+    const done = (v: BodyResult) => {
       if (settled) return;
       settled = true;
       chunks.length = 0; // release buffers
@@ -219,28 +231,49 @@ function readBody(req: IncomingMessage): Promise<any> {
     req.on("data", (chunk: Buffer) => {
       size += chunk.length; // count BYTES, not JS string length
       if (size > 1_000_000) {
-        done(null); // oversized -> caller treats as bad request
-        req.destroy();
+        tooLarge = true;
+        chunks.length = 0;
         return;
       }
-      chunks.push(chunk);
+      if (!tooLarge) chunks.push(chunk);
     });
     req.on("end", () => {
+      if (tooLarge) {
+        done({ ok: false, status: 413, error: "request body too large" });
+        return;
+      }
       try {
-        done(JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}"));
+        done({ ok: true, value: JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}") });
       } catch {
-        done(null);
+        done({ ok: false, status: 400, error: "invalid JSON body" });
       }
     });
     // destroy() may emit 'close'/'aborted' instead of 'error' — settle on all.
-    req.on("error", () => done(null));
-    req.on("close", () => done(null));
-    req.on("aborted", () => done(null));
+    const interrupted = () => done({ ok: false, status: 400, error: "request body interrupted" });
+    req.on("error", interrupted);
+    req.on("close", interrupted);
+    req.on("aborted", interrupted);
   });
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
   res.end(text);
+}
+
+/**
+ * Drain bodies on routes that reject before `readBody` runs. Leaving an
+ * IncomingMessage paused can strand unread bytes ahead of the next request on
+ * a keep-alive connection, making a normal 401/404/405 response poison that
+ * socket for subsequent API calls.
+ */
+function drainAndSendJson(req: IncomingMessage, res: ServerResponse, status: number, body: unknown): void {
+  req.on("error", () => {});
+  req.resume();
+  sendJson(res, status, body);
 }

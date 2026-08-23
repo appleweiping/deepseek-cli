@@ -9,10 +9,15 @@ export class MCPManager {
   private connectionStatus: Array<{ name: string; ok: boolean; tools: number; error?: string; error_type?: string }> = [];
 
   async connectAll(servers: Record<string, MCPServerConfig>): Promise<void> {
-    this.disconnectAll();
+    await this.disconnectAll();
     this.connectionStatus = [];
     for (const [name, cfg] of Object.entries(servers)) {
-      const client = new MCPClient(cfg.command, cfg.args || [], cfg.env || {}, name);
+      const client = new MCPClient(cfg.command, cfg.args || [], cfg.env || {}, name, {
+        cwd: cfg.cwd,
+        timeoutMs: cfg.timeout_ms,
+        includeTools: cfg.include_tools,
+        excludeTools: cfg.exclude_tools,
+      });
       try {
         await client.connect();
         this.clients.push(client);
@@ -40,17 +45,14 @@ export class MCPManager {
 
   async callTool(fullName: string, args: Record<string, any>): Promise<ToolResult | null> {
     for (const client of this.clients) {
-      const prefix = `mcp_${client.serverName}_`;
-      if (fullName.startsWith(prefix)) {
-        const realName = fullName.slice(prefix.length);
-        return client.callTool(realName, args);
-      }
+      if (client.hasExposedTool(fullName)) return client.callExposedTool(fullName, args);
     }
     return null;
   }
 
-  disconnectAll() {
-    for (const c of this.clients) c.disconnect();
+  async disconnectAll(): Promise<void> {
+    const clients = this.clients;
     this.clients = [];
+    await Promise.all(clients.map((client) => client.disconnect()));
   }
 }

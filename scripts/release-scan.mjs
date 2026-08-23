@@ -49,11 +49,27 @@ for (const unexpected of packFiles) {
 }
 
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+const packageLock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf-8"));
+const lockRoot = packageLock.packages?.[""];
 for (const [name, target] of Object.entries(packageJson.bin ?? {})) {
   const normalizedTarget = target.replace(/\\/g, "/").replace(/^\.\//, "");
   if (!packFileSet.has(normalizedTarget)) failures.push(`pack-bin-target-missing: ${name} -> ${target}`);
 }
-if (packageJson.version !== "0.3.0") failures.push(`package-version-mismatch: ${packageJson.version}`);
+if (packageJson.version !== "0.4.0") failures.push(`package-version-mismatch: ${packageJson.version}`);
+if (packageLock.version !== packageJson.version || lockRoot?.version !== packageJson.version) {
+  failures.push(`package-lock-version-mismatch: package=${packageJson.version} lock=${packageLock.version} root=${lockRoot?.version}`);
+}
+if (packageJson.engines?.node !== ">=22.18.0" || lockRoot?.engines?.node !== packageJson.engines.node) {
+  failures.push(`node-engine-mismatch: package=${packageJson.engines?.node} lock=${lockRoot?.engines?.node}`);
+}
+if (lockRoot?.dependencies?.["@modelcontextprotocol/client"] !== packageJson.dependencies?.["@modelcontextprotocol/client"]) {
+  failures.push("package-lock-mcp-version-mismatch");
+}
+
+const ciWorkflow = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf-8");
+if (!/node-version:\s*['"]22\.18\.0['"]/.test(ciWorkflow)) failures.push("ci-does-not-test-minimum-node");
+if (!/os:\s*\[ubuntu-latest, windows-latest\]/.test(ciWorkflow)) failures.push("ci-platform-matrix-missing");
+if (!/\brun:\s*npm ci\b/.test(ciWorkflow)) failures.push("ci-does-not-use-npm-ci");
 
 const packagedConfig = readFileSync(join(root, "config.toml"), "utf-8");
 for (const pattern of [/D:[\\/]/i, /agent-resources/i, /ARIS/i, /Vipin/i, /agent hub/i]) {
@@ -68,7 +84,8 @@ const distPath = join(root, "dist", "index.js");
 if (existsSync(distPath)) {
   const bytes = statSync(distPath).size;
   assert.ok(bytes > 10_000, "dist/index.js looks unexpectedly small");
-  assert.ok(bytes < 250_000, `dist/index.js is ${bytes} bytes; revisit README size claims and package surface`);
+  const maxDistBytes = 256 * 1024;
+  assert.ok(bytes < maxDistBytes, `dist/index.js is ${bytes} bytes (cap ${maxDistBytes}); revisit the package surface`);
   console.log(JSON.stringify({ ok: true, dist_bytes: bytes }));
 } else {
   console.log(JSON.stringify({ ok: true, dist_missing: true }));

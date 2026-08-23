@@ -22,6 +22,7 @@ import {
   type Config,
 } from "./config.js";
 import { safeErrorMessage } from "./runtime/safe-text.js";
+import { buildRepositoryMap } from "./context/repo-map.js";
 
 export class Agent {
   private client: DeepSeekClient;
@@ -36,6 +37,9 @@ export class Agent {
     // Sub-agents get an isolated copy of config so their runtime mutations never
     // bleed into the parent (or sibling) agents that share the original object.
     this.config = opts.isSubagent ? structuredClone(config) : config;
+    const configuredAuto = this.config.llm.model.trim().toLowerCase() === "auto";
+    if (configuredAuto) applyModelOverride(this.config, "flash");
+    this.autoRoute = configuredAuto;
     this.client = new DeepSeekClient(this.config.llm);
     this.mcpManager = mcpManager;
     this.maxIterations = this.config.agent.max_iterations;
@@ -46,11 +50,18 @@ export class Agent {
     if (!opts.isSubagent) this.registerRuntimeTool();
 
     const workspace = process.cwd();
+    const repositoryMap = this.config.context?.repo_map_enabled === false
+      ? undefined
+      : buildRepositoryMap(workspace, {
+          maxChars: this.config.context?.repo_map_max_chars,
+          maxFiles: this.config.context?.repo_map_max_files,
+        }).text;
     const systemPrompt = this.config.agent.system_prompt
       ? `${this.config.agent.system_prompt}\n\n${RUNTIME_SWITCHING_PROMPT}`
       : assembleSystemPrompt({
           runtimeGuidance: RUNTIME_SWITCHING_PROMPT,
           projectInstructions: discoverProjectInstructions(workspace),
+          repositoryMap,
           skills: renderSkillsBlock(discoverSkills(workspace)),
           handoff: readHandoff(workspace),
         });
@@ -58,6 +69,10 @@ export class Agent {
   }
 
   setModel(model: string): string {
+    if (model.trim().toLowerCase() === "auto") {
+      this.setAutoRoute(true);
+      return this.client.getModel();
+    }
     applyModelOverride(this.config, model);
     const resolvedModel = this.config.llm.model;
     this.client.setModel(resolvedModel);
@@ -79,6 +94,8 @@ export class Agent {
       model: this.client.getModel(),
       thinking: this.client.getThinking().mode,
       reasoning_effort: this.client.getThinking().effort,
+      routing: this.autoRoute ? "auto" : "fixed",
+      ...(this.lastRoute ? { last_route: this.lastRoute } : {}),
     };
   }
 
@@ -233,6 +250,7 @@ export class Agent {
   /** Enable/disable per-turn auto routing of model + thinking effort. */
   setAutoRoute(on: boolean): void {
     this.autoRoute = on;
+    if (!on) this.lastRoute = undefined;
   }
   isAutoRoute(): boolean {
     return this.autoRoute;
@@ -318,6 +336,9 @@ export class Agent {
     let args: Record<string, any>;
     try {
       args = JSON.parse(tc.function.arguments);
+      if (!args || typeof args !== "object" || Array.isArray(args)) {
+        return "Error: tool arguments must be a JSON object";
+      }
     } catch {
       return "Error: invalid JSON arguments";
     }
@@ -325,21 +346,26 @@ export class Agent {
     const startedAt = Date.now();
     events.onToolStart?.(name, args);
 
-    const mcpResult = await this.mcpManager.callTool(name, args);
-    if (mcpResult) {
-      events.onToolEnd?.(name, Date.now() - startedAt, Boolean(mcpResult.error));
-      return mcpResult.output;
-    }
+    try {
+      const mcpResult = await this.mcpManager.callTool(name, args);
+      if (mcpResult) {
+        events.onToolEnd?.(name, Date.now() - startedAt, Boolean(mcpResult.error));
+        return mcpResult.output;
+      }
 
-    const tool = getTool(name);
-    if (!tool) {
+      const tool = getTool(name);
+      if (!tool) {
+        events.onToolEnd?.(name, Date.now() - startedAt, true);
+        return `Unknown tool: ${name}`;
+      }
+
+      const result = await tool.handler(args);
+      events.onToolEnd?.(name, Date.now() - startedAt, Boolean(result.error));
+      return result.output;
+    } catch (error) {
       events.onToolEnd?.(name, Date.now() - startedAt, true);
-      return `Unknown tool: ${name}`;
+      return `Tool ${name} failed: ${safeErrorMessage(error)}`;
     }
-
-    const result = await tool.handler(args);
-    events.onToolEnd?.(name, Date.now() - startedAt, Boolean(result.error));
-    return result.output;
   }
 
   private registerRuntimeTool() {
@@ -351,7 +377,7 @@ export class Agent {
         properties: {
           model: {
             type: "string",
-            description: "Model or alias: pro, flash, chat, reasoner, or a full DeepSeek model name",
+            description: "Model or alias: auto, pro, flash, chat, reasoner, or a full DeepSeek model name",
           },
           thinking: {
             type: "string",
@@ -386,7 +412,7 @@ export class Agent {
 }
 
 const RUNTIME_SWITCHING_PROMPT = `Runtime switching:
-- You may call configure_deepseek_runtime to switch between pro/flash/chat/reasoner and thinking modes.
+- You may call configure_deepseek_runtime to switch between auto/pro/flash/chat/reasoner and thinking modes.
 - Use flash or chat for routine text, search, and simple file tasks.
 - Use pro or enabled thinking for complex debugging, architecture review, or multi-step reasoning.
 - The official V4 matrix supports both pro and flash with thinking enabled or disabled.

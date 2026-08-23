@@ -7,15 +7,16 @@
 </p>
 
 <p align="center">
-  Side-git snapshots · session fork/backtrack · auto model routing · skills ·
-  sub-agents · LSP diagnostics · live cost tracking · MCP · optional local HTTP/SSE API.
+  Budgeted repo maps · side-git snapshots · session fork/backtrack · auto model routing ·
+  skills · sub-agents · LSP diagnostics · official MCP SDK · optional local HTTP/SSE API.
 </p>
 
 WEIPING_WHALE is a focused coding-agent CLI for people who want a small, honest
 terminal tool rather than a web app. It inspects files, searches with glob/grep,
 runs shell commands behind approval gates, previews edits as patches, checkpoints
 your workspace around every turn so you can `/undo`, routes between DeepSeek models
-per turn, connects MCP servers, and can expose a localhost HTTP/SSE control surface.
+per turn, supplies an ignore-aware map of the repository, connects MCP servers through
+the official SDK, and can expose a localhost HTTP/SSE control surface.
 
 > **Based on [CodeWhale](https://github.com/Hmbown/CodeWhale) (MIT).** WEIPING_WHALE
 > re-implements CodeWhale's feature set in TypeScript. CodeWhale is the mature Rust
@@ -23,6 +24,8 @@ per turn, connects MCP servers, and can expose a localhost HTTP/SSE control surf
 > Not affiliated with DeepSeek Inc.
 
 ## Install
+
+Requires Node.js 22.18 or newer.
 
 ```bash
 npm install -g weiping-whale
@@ -65,6 +68,7 @@ wwhale --serve --port 7878
 | Area | What it does |
 | --- | --- |
 | Model runtime | DeepSeek V4 Pro/Flash presets, thinking controls, `--model auto` per-turn routing |
+| Repository context | ignore-aware, budgeted file/symbol map for large-codebase orientation |
 | File work | `read_file`, `write_file`, `edit_file`, `glob`, `grep` |
 | Shell work | `execute_bash` with blocked-command rules, approval queue, bounded timeout |
 | Patch safety | writes default to preview; apply with `/apply <id>` |
@@ -76,9 +80,24 @@ wwhale --serve --port 7878
 | Sub-agents | `agent_open` / `agent_eval` bounded background workers |
 | LSP | post-edit diagnostics from TypeScript + Python language servers |
 | Vision | attach images with `/image`; sent as `image_url` content blocks |
-| MCP | stdio MCP servers become normal tools with diagnostics |
+| MCP | official MCP TypeScript SDK v2: current/legacy negotiation, pagination, schemas, timeouts, clean shutdown |
 | HTTP API | optional `--serve` localhost control surface with bearer-token auth |
 | Memory | agentmemory REST when reachable; local outbox when offline |
+
+## Repository map
+
+At session start, WEIPING_WHALE builds a deterministic map of git-visible source
+and project files. It extracts concise top-level symbols for common languages and
+keeps the map within a strict character/file budget. Gitignored files, build output,
+binary assets, and symlink escapes are excluded. The map is orientation only—the
+agent is explicitly told to open files before relying on implementation details.
+
+```toml
+[context]
+repo_map_enabled = true
+repo_map_max_chars = 12000
+repo_map_max_files = 400
+```
 
 ## Snapshots & undo
 
@@ -154,15 +173,31 @@ Use `/permission-model <mode>` or the equivalent environment variables.
 | `locked` | preview | read-only | never run risky commands |
 
 The default is `safe`. Broadly destructive shell commands stay blocked even in
-permissive modes. This is approval-gating, **not** an OS sandbox.
+permissive modes. Workspace writes reject lexical escapes and symlink/junction
+traversal. This is approval-gating and path containment, **not** an OS sandbox.
+
+## Workspace config trust
+
+A repository can place `weiping-whale.toml` in its root. That file can redirect
+the provider endpoint (and therefore an API key) or launch MCP child processes, so
+workspace-local TOML is ignored until that exact canonical directory is trusted:
+
+```bash
+wwhale --cwd path/to/repo --trust-workspace --doctor
+```
+
+The decision is stored in `~/.weiping-whale/trusted-workspaces.json`. Explicit
+`WEIPING_WHALE_CONFIG` / `DEEPSEEK_CONFIG` paths and user-level config remain
+available without workspace trust because choosing them is already an explicit
+user action. `--doctor` reports the active config scope and any ignored local file.
 
 ## Configuration
 
-WEIPING_WHALE loads the first config file it finds:
+WEIPING_WHALE loads the first eligible config file it finds:
 
 1. `WEIPING_WHALE_CONFIG` / `DEEPSEEK_CONFIG`
-2. `./weiping-whale.toml` / `./.weiping-whale.toml`
-3. `./deepseek-cli.toml` / `./.deepseek-cli.toml`
+2. trusted `./weiping-whale.toml` / `./.weiping-whale.toml`
+3. trusted `./deepseek-cli.toml` / `./.deepseek-cli.toml`
 4. `~/.weiping-whale/config.toml` / `~/.deepseek-cli/config.toml`
 5. the packaged fallback `config.toml`
 
@@ -187,6 +222,19 @@ max_depth = 2
 [lsp]
 enabled = true
 include_warnings = false
+
+[context]
+repo_map_enabled = true
+repo_map_max_chars = 12000
+repo_map_max_files = 400
+
+# MCP servers use the official SDK. Optional include_tools is an allowlist;
+# exclude_tools removes individual tools after paginated discovery.
+[mcp_servers.example]
+command = "node"
+args = ["server.mjs"]
+timeout_ms = 60000
+include_tools = ["search", "read"]
 ```
 
 ## Diagnostics
@@ -201,7 +249,19 @@ failures. It never prints API keys, tokens, or full provider URLs.
 npm ci
 npm run typecheck
 npm test          # build + e2e suites + package smoke + release scan
+npm run audit:prod
 ```
+
+CI runs the full gate on both Ubuntu and Windows.
+
+## Upstream design references
+
+This release re-implements compatible patterns rather than copying source:
+
+- [Aider](https://github.com/Aider-AI/aider) (Apache-2.0): budgeted repository maps.
+- [OpenAI Codex](https://github.com/openai/codex) (Apache-2.0): explicit workspace boundaries and project instructions.
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) (Apache-2.0): trust-gating repository-local configuration.
+- [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (MIT/Apache-2.0): the official client is used directly as a dependency.
 
 ## Relationship to CodeWhale
 

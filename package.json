@@ -1,7 +1,7 @@
 {
   "name": "weiping-whale",
-  "version": "0.3.0",
-  "description": "WEIPING_WHALE — terminal-native DeepSeek coding agent: side-git snapshots, session fork/backtrack, auto model routing, skills, sub-agents, LSP diagnostics, live cost tracking, MCP, and an optional local HTTP/SSE API. Based on CodeWhale (MIT).",
+  "version": "0.4.0",
+  "description": "WEIPING_WHALE — terminal-native DeepSeek coding agent with repo maps, hardened workspace boundaries, official MCP SDK, snapshots, sessions, routing, skills, sub-agents, LSP, cost tracking, and an optional HTTP/SSE API. Based on CodeWhale (MIT).",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -14,9 +14,13 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "audit:prod": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
     "scan:release": "node scripts/release-scan.mjs",
     "smoke:package": "node scripts/package-smoke.mjs",
-    "test": "npm run build && node scripts/e2e.mjs && node --import tsx scripts/e2e-snapshots.mjs && node --import tsx scripts/e2e-sessions.mjs && node --import tsx scripts/e2e-cost.mjs && node --import tsx scripts/e2e-compaction.mjs && node --import tsx scripts/e2e-prompt.mjs && node --import tsx scripts/e2e-router.mjs && node --import tsx scripts/e2e-skills.mjs && node --import tsx scripts/e2e-subagent.mjs && node --import tsx scripts/e2e-vision.mjs && node --import tsx scripts/e2e-lsp.mjs && node --import tsx scripts/e2e-server.mjs && npm run smoke:package && npm run scan:release"
+    "test": "npm run build && node scripts/e2e.mjs && node --import tsx scripts/e2e-snapshots.mjs && node --import tsx scripts/e2e-sessions.mjs && node --import tsx scripts/e2e-cost.mjs && node --import tsx scripts/e2e-compaction.mjs && node --import tsx scripts/e2e-prompt.mjs && node --import tsx scripts/e2e-repo-map.mjs && node --import tsx scripts/e2e-workspace-trust.mjs && node --import tsx scripts/e2e-sandbox.mjs && node --import tsx scripts/e2e-agent-tools.mjs && node --import tsx scripts/e2e-router.mjs && node --import tsx scripts/e2e-skills.mjs && node --import tsx scripts/e2e-subagent.mjs && node --import tsx scripts/e2e-vision.mjs && node --import tsx scripts/e2e-lsp.mjs && node --import tsx scripts/e2e-mcp.mjs && node --import tsx scripts/e2e-server.mjs && npm run smoke:package && npm run scan:release"
+  },
+  "tsdown": {
+    "fixedExtension": false
   },
   "keywords": [
     "deepseek",
@@ -44,7 +48,7 @@
     "url": "https://github.com/appleweiping/WEIPING_WHALE/issues"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.18.0"
   },
   "files": [
     "dist/",
@@ -57,15 +61,16 @@
   ],
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/client": "2.0.0",
     "fast-glob": "^3.3.3",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "4.3.1",
     "vscode-jsonrpc": "^8.2.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
-    "tsdown": "^0.9.0",
-    "tsx": "^4.19.0",
+    "tsdown": "0.22.14",
+    "tsx": "4.23.12",
     "typescript": "^5.7.0",
     "typescript-language-server": "^4.4.1"
   }

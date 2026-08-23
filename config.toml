@@ -29,3 +29,7 @@ include_warnings = false
 poll_after_edit_ms = 6000
 max_per_file = 20
 
+[context]
+repo_map_enabled = true
+repo_map_max_chars = 12000
+repo_map_max_files = 400

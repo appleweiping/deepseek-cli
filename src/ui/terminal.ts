@@ -17,6 +17,8 @@ export interface RuntimeStatus {
   model: string;
   thinking: string;
   reasoning_effort: string;
+  routing?: string;
+  last_route?: string;
 }
 
 export interface BannerStats {
@@ -32,6 +34,7 @@ export function banner(runtime: RuntimeStatus, cwd: string, stats: BannerStats) 
   console.log(`  ${DIM}${line}${RESET}`);
   console.log(`  ${DIM}model${RESET}     ${GREEN}${runtime.model}${RESET}`);
   console.log(`  ${DIM}thinking${RESET}   ${YELLOW}${formatThinking(runtime)}${RESET}`);
+  console.log(`  ${DIM}routing${RESET}    ${runtime.routing ?? "fixed"}`);
   console.log(`  ${DIM}cwd${RESET}       ${shorten(cwd, w - 12)}`);
   console.log(`  ${DIM}tools${RESET}     ${stats.toolCount} total, ${stats.mcpServerCount} MCP`);
   console.log(`  ${DIM}${line}${RESET}`);
@@ -974,6 +977,7 @@ ${BOLD}Non-interactive${RESET}
   deepseek --session work1 -t "start a task"
   deepseek --resume work1 -t "continue"
   deepseek --cwd path/to/repo -t "inspect this project"
+  deepseek --cwd path/to/repo --trust-workspace --doctor
   deepseek -t "summarize this repo"
   deepseek --model pro --thinking on -t "review this PR"
   deepseek --model flash --thinking off --doctor
@@ -986,6 +990,7 @@ ${BOLD}Status${RESET}
   model:            ${runtime.model}
   thinking:         ${runtime.thinking}
   reasoning_effort: ${runtime.reasoning_effort}
+  routing:          ${runtime.routing ?? "fixed"}${runtime.last_route ? `\n  last_route:       ${runtime.last_route}` : ""}
   cwd:              ${cwd}
   tools:            ${stats.toolCount}
   mcp:              ${stats.mcpServerCount} server(s)
@@ -996,7 +1001,7 @@ ${BOLD}Status${RESET}
 }
 
 export function printRuntimeUpdated(runtime: RuntimeStatus) {
-  console.log(`${DIM}runtime: ${runtime.model}, thinking=${runtime.thinking}, reasoning_effort=${runtime.reasoning_effort}${RESET}`);
+  console.log(`${DIM}runtime: ${runtime.model}, thinking=${runtime.thinking}, reasoning_effort=${runtime.reasoning_effort}, routing=${runtime.routing ?? "fixed"}${RESET}`);
 }
 
 function formatThinking(runtime: RuntimeStatus): string {

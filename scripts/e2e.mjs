@@ -67,7 +67,7 @@ function json(args, options) {
 try {
   const version = run(["--version"]);
   assert.equal(version.status, 0, version.error?.message || version.stderr || version.stdout);
-  assert.match(version.stdout, /0\.3\.0/);
+  assert.match(version.stdout, /0\.4\.0/);
 
   const doctor = json(["--doctor"]);
   assert.equal(doctor.ok, true);
@@ -83,6 +83,10 @@ try {
   assert.equal(doctor.paths.memory_outbox_dir, outboxDir);
   assert.deepEqual(doctor.mcp_diagnostics, []);
   assert.ok(doctor.checks.every((check) => ["ok", "warn"].includes(check.level)));
+
+  const autoDoctor = json(["--doctor", "--model", "auto"]);
+  assert.equal(autoDoctor.runtime.model, "deepseek-v4-flash", "auto starts on the real fast provider model");
+  assert.equal(autoDoctor.runtime.routing, "auto", "doctor reports routing mode instead of pretending 'auto' is a provider model");
 
   const models = json(["--models"]);
   assert.ok(models.models.some((model) => model.name === "pro"));
@@ -158,6 +162,8 @@ try {
       "/model pro",
       "/thinking max",
       "/status",
+      "/model auto",
+      "/status",
       "\\permission-model safe",
       "/approval never",
       "/sandbox read-only",
@@ -179,6 +185,7 @@ try {
   assert.match(interactive.stdout, /model:\s+deepseek-v4-pro/);
   assert.match(interactive.stdout, /thinking:\s+enabled/);
   assert.match(interactive.stdout, /reasoning_effort:\s+max/);
+  assert.match(interactive.stdout, /routing:\s+auto/);
   assert.match(interactive.stdout, /approval_mode:\s+never/);
   assert.match(interactive.stdout, /sandbox_mode:\s+read-only/);
   assert.match(interactive.stdout, /write_mode:\s+direct/);

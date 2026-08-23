@@ -486,11 +486,13 @@ function estimateWorkspaceSize(root: string, cap: number): number {
       const full = join(dir, name);
       let st;
       try {
-        st = statSync(full);
+        st = lstatSync(full);
       } catch {
         continue;
       }
-      if (st.isDirectory()) {
+      if (st.isSymbolicLink()) {
+        continue;
+      } else if (st.isDirectory()) {
         if (skip.has(name)) continue;
         stack.push(full);
       } else if (st.isFile()) {

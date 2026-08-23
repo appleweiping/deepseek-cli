@@ -10,18 +10,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          # Exercise the declared minimum, not merely the newest Node 22 patch.
+          node-version: '22.18.0'
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm pack --dry-run
-
-
+      - if: matrix.os == 'ubuntu-latest'
+        run: npm run audit:prod

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.0 - Context, trust, and protocol hardening
+
+### Added
+
+- Ignore-aware, character-budgeted repository maps with concise symbol extraction
+  for TypeScript/JavaScript, Python, Rust, Go, JVM, C/C++, C#, Ruby, PHP, and Swift.
+- Persisted exact-directory trust for workspace-local TOML. Untrusted local config
+  cannot redirect the API key to another endpoint or launch an MCP process;
+  `--trust-workspace` records an explicit decision and `--doctor` reports scope.
+- Official `@modelcontextprotocol/client` v2 integration with modern/legacy protocol
+  negotiation, paginated discovery, output-schema validation, request deadlines,
+  bounded stdio frames, provider-safe tool names, allow/deny filters, and ordered
+  child-process shutdown.
+- Windows + Ubuntu CI matrix and a production dependency audit gate.
+
+### Fixed
+
+- Blocked workspace-write escapes through file symlinks and Windows junctions.
+- Stopped instruction, handoff, repository-map, and snapshot-size traversal from
+  following linked content outside the workspace.
+- Contained malformed tool arguments/handler exceptions so one bad call no longer
+  tears down the entire agent turn.
+- Added runtime TOML type/range validation, prototype-pollution key rejection, and
+  field-specific startup errors.
+- Hardened HTTP/SSE responses with no-store/nosniff headers, stable 400/413/405
+  semantics, bounded-body draining, keep-alive reuse after rejected requests, and
+  redacted streamed errors.
+- Kept persisted workspace trust bound to the original canonical identity when a
+  trusted pathname is later replaced by a symlink or junction.
+- Made MCP tool names collision-resistant across servers, capped pathological
+  pagination/output/latency paths in regression tests, and awaited SDK shutdown.
+- Ranked repo-map candidates before applying the file cap and continued packing
+  smaller entries when a symbol-heavy block exceeds the remaining character budget.
+- Reported auto routing explicitly alongside the real provider model, and pinned CI
+  to the declared Node.js 22.18.0 compatibility floor.
+- Upgraded `js-yaml` to 4.3.1, fixing the high-severity quadratic CPU advisories
+  GHSA-52cp-r559-cp3m and GHSA-5p4m-2wfm-xmqj.
+- Upgraded the TypeScript build runner/toolchain, removed all remaining audited
+  development vulnerabilities, and made the required Node.js 22.18 floor explicit.
+
+### Verification
+
+- `npm run typecheck`
+- `npm test` (build + 17 focused E2E suites + package install smoke + release scan)
+- `npm run audit:prod` (0 production vulnerabilities)
+- `npm audit --audit-level=low` (0 known vulnerabilities across all dependencies)
+
+### Design references
+
+- Aider (Apache-2.0): repository-map context budgeting.
+- OpenAI Codex and Gemini CLI (Apache-2.0): workspace boundaries, instruction and
+  trust patterns.
+- Official MCP TypeScript SDK (MIT/Apache-2.0): protocol implementation.
+
 ## 0.3.0 - WEIPING_WHALE (CodeWhale-parity port)
 
 The project was renamed from **DEEPSEEK_CLI** to **WEIPING_WHALE** and grew a large

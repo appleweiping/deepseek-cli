@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { EventEmitter } from "events";
-import { MODEL_PRESETS, applyRuntimeOverrides, loadConfig, validateConfig, type Config } from "./config.js";
+import { MODEL_PRESETS, applyModelOverride, applyRuntimeOverrides, loadConfig, validateConfig, type Config } from "./config.js";
 import { Agent } from "./agent.js";
 import type { Usage } from "./llm/deepseek.js";
 import { MCPManager } from "./mcp/manager.js";
@@ -52,6 +52,7 @@ import { setActiveLspManager } from "./lsp/active.js";
 import { diagnosticsSuffix } from "./lsp/active.js";
 import { startRuntimeApi, type RuntimeApiHandle } from "./server/runtime-api.js";
 import { CostTracker } from "./cost.js";
+import { isWorkspaceTrusted, trustWorkspace } from "./safety/workspace-trust.js";
 
 // ── Execution mode ────────────────────────────────────────────────────────────
 type ExecMode = "auto" | "plan" | "ask";
@@ -131,7 +132,23 @@ async function main() {
   let sessionId = readFlag(args, "--session") ?? resumeSessionId ?? createSessionId();
   const task = readFlag(args, "-t") ?? readFlag(args, "--task") ?? readPositionalTask(args);
 
-  const config = loadConfig();
+  let workspaceTrusted = isWorkspaceTrusted(process.cwd());
+  if (args.includes("--trust-workspace")) {
+    const trusted = trustWorkspace(process.cwd());
+    workspaceTrusted = true;
+    if (!json) printInfo(`Trusted workspace configuration: ${trusted}`);
+  }
+  let config: Config;
+  try {
+    config = loadConfig({ allowWorkspaceConfig: workspaceTrusted });
+  } catch (err: any) {
+    printCliError(safeErrorMessage(err), json);
+    process.exit(1);
+  }
+  if (config.workspace_config_ignored && !json) {
+    printInfo(`Ignored untrusted workspace config: ${config.workspace_config_ignored}`);
+    printInfo("Review it, then rerun once with --trust-workspace to persist trust for this exact directory.");
+  }
   if (!cwdOverride && config.agent.workspace && config.agent.workspace !== ".") {
     try {
       changeDirectory(config.agent.workspace);
@@ -140,9 +157,10 @@ async function main() {
       process.exit(1);
     }
   }
-  // "auto" is not a real model — it enables the Fin router. Strip it from the
-  // runtime overrides and turn on auto-routing instead.
-  let wantAutoRoute = false;
+  // "auto" is not a provider model — whether it came from config or CLI, it
+  // enables the Fin router and starts from the fast default model.
+  let wantAutoRoute = config.llm.model.trim().toLowerCase() === "auto";
+  if (wantAutoRoute) applyModelOverride(config, "flash");
   try {
     const runtimeArgs = parseRuntimeArgs(args);
     if (runtimeArgs.model && runtimeArgs.model.trim().toLowerCase() === "auto") {
@@ -160,8 +178,8 @@ async function main() {
     if (Object.keys(config.mcp_servers).length > 0) {
       await doctorMcpManager.connectAll(config.mcp_servers);
     }
-    printDoctor(config, json, doctorMcpManager);
-    doctorMcpManager.disconnectAll();
+    printDoctor(config, json, doctorMcpManager, wantAutoRoute);
+    await doctorMcpManager.disconnectAll();
     process.exit(validateConfig(config).some((check) => check.level === "error") ? 1 : 0);
   }
 
@@ -281,11 +299,11 @@ async function main() {
       if (json) console.error(JSON.stringify({ ok: false, session: sessionId, error: { message } }, null, 2));
       else printCliError(message, false);
       lspManager.dispose();
-      mcpManager.disconnectAll();
+      await mcpManager.disconnectAll();
       process.exit(1);
     }
     lspManager.dispose();
-    mcpManager.disconnectAll();
+    await mcpManager.disconnectAll();
     process.exit(0);
   }
 
@@ -374,7 +392,7 @@ async function main() {
     } catch {}
     if (apiHandle) await apiHandle.close().catch(() => {});
     lspManager.dispose();
-    mcpManager.disconnectAll();
+    await mcpManager.disconnectAll();
     process.exit(0);
   }
 }
@@ -802,7 +820,7 @@ async function handleCommand(input: string, context: CommandContext): Promise<bo
     switch (command) {
       case "exit":
       case "quit":
-        context.mcpManager.disconnectAll();
+        await context.mcpManager.disconnectAll();
         process.exit(0);
         return true;
       case "help":
@@ -812,7 +830,7 @@ async function handleCommand(input: string, context: CommandContext): Promise<bo
         printModels(false);
         return true;
       case "doctor":
-        printDoctor(context.config, false, context.mcpManager);
+        printDoctor(context.config, false, context.mcpManager, context.agent.isAutoRoute());
         return true;
       case "tools":
         printTools(context.mcpManager);
@@ -1153,7 +1171,7 @@ async function handleMcpCommand(arg: string, context: CommandContext): Promise<v
     return;
   }
   if (subcommand === "reconnect" || subcommand === "reload") {
-    context.mcpManager.disconnectAll();
+    await context.mcpManager.disconnectAll();
     await context.mcpManager.connectAll(context.config.mcp_servers);
     printMcpDiagnostics(context.mcpManager);
     return;
@@ -1372,7 +1390,7 @@ function isWhitespace(char: string | undefined): boolean {
   return !char || /\s/.test(char);
 }
 
-function printDoctor(config: Config, json = false, mcpManager?: MCPManager) {
+function printDoctor(config: Config, json = false, mcpManager?: MCPManager, autoRoute = false) {
   const configuredMcpServers = Object.keys(config.mcp_servers).length;
   const hasApiKey = Boolean(config.llm.api_key);
   const checks = validateConfig(config);
@@ -1386,6 +1404,7 @@ function printDoctor(config: Config, json = false, mcpManager?: MCPManager) {
       model: config.llm.model,
       thinking: config.llm.thinking,
       reasoning_effort: config.llm.reasoning_effort,
+      routing: autoRoute ? "auto" : "fixed",
     },
     endpoint: {
       configured: endpointConfigured(config.llm.base_url),
@@ -1394,6 +1413,8 @@ function printDoctor(config: Config, json = false, mcpManager?: MCPManager) {
     paths: {
       cwd: process.cwd(),
       config_path: config.config_path ?? null,
+      config_scope: config.config_scope ?? null,
+      workspace_config_ignored: config.workspace_config_ignored ?? null,
       session_dir: sessionDir(),
       memory_outbox_dir: memoryDiagnostics().outbox_dir,
     },
@@ -1406,6 +1427,7 @@ function printDoctor(config: Config, json = false, mcpManager?: MCPManager) {
       approval_mode: getApprovalMode(),
       write_mode: getWriteMode(),
       sandbox_mode: getSandboxMode(),
+      workspace_config_trusted: isWorkspaceTrusted(process.cwd()),
     },
     memory: memoryDiagnostics(),
     mcp_servers: configuredMcpServers,
