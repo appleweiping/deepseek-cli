@@ -1,6 +1,8 @@
 # DeepSeek CLI Skill
 
-Use this skill for non-trivial work on `deepseek-cli-agent`, especially release-level improvements, runtime honesty, safety, MCP, memory, terminal UX, packaging, or documentation.
+Use this skill for non-trivial work on `WEIPING_WHALE` (including its legacy
+`deepseek` CLI alias), especially release-level improvements, runtime honesty,
+safety, MCP, memory, terminal UX, packaging, or documentation.
 
 ## Purpose
 
@@ -13,9 +15,11 @@ planning -> design -> development -> testing -> release -> maintenance -> monito
 1. Inspect the current git status and protect user changes.
 2. Read `README.md`, `package.json`, `config.toml`, `src/index.ts`, `src/agent.ts`, `src/config.ts`, `src/llm/deepseek.ts`, `src/memory.ts`, `src/session.ts`, `src/safety/*`, `src/tools/*`, `src/mcp/*`, `.github/workflows/ci.yml`, and the relevant tests/scripts.
 3. Identify the project relationship:
-   - `vipin-council`: orchestration and cross-model review.
-   - `deepseek-cli`: terminal worker and fast local coding agent.
-   - `vipin-lab`: experiment/workbench surface.
+   - `WEIPING_COUNCIL`: orchestration and cross-model review.
+   - `WEIPING_WHALE`: terminal worker and fast local coding agent.
+   - `WEIPING_LAB`: experiment/workbench surface.
+   - `WEIPING_WIKI`: public route map, not a runtime dependency.
+   - `AGENT_RESOURCE`: optional shared skill library, not a required checkout.
 4. Define a version-level batch. Do not ship only typo fixes unless the user explicitly asks for a tiny change.
 
 ## Phase 2 - Design
@@ -89,8 +93,8 @@ Remove stale claims instead of layering corrections underneath them.
 Use these checks when diagnosing user reports:
 
 ```bash
-deepseek --doctor --json
-deepseek --models --json
+wwhale --doctor --json
+wwhale --models --json
 npm test
 npm pack --dry-run
 ```
@@ -107,4 +111,3 @@ For each substantial upgrade:
 4. Run all verification.
 5. Only after the batch is complete, ask parallel reviewers to score architecture, safety, UX, tests, documentation, release readiness, and honesty.
 6. Iterate until the score is 10/10 before commit and push.
-

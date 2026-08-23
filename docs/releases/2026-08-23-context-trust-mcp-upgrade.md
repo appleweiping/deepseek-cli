@@ -39,6 +39,8 @@ no upstream source was copied into this repository.
   advisories.
 - Upgraded the build runner and its transitive toolchain, resulting in a clean full
   dependency audit; the supported runtime floor is now Node.js 22.18.
+- Made the checked-in Windows launcher repository-relative with an installed npm-bin
+  fallback, and expanded release scanning to every file in the actual npm package.
 
 ## Verification boundary
 

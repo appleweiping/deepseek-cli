@@ -254,6 +254,17 @@ npm run audit:prod
 
 CI runs the full gate on both Ubuntu and Windows.
 
+## Relationship to Neighbor Projects
+
+- `WEIPING_WHALE` is the terminal coding worker. It owns its local sessions,
+  checkpoints, `.weiping-whale/handoff.md`, tools, and optional HTTP/SSE surface.
+- `WEIPING_COUNCIL` owns multi-model deliberation and its own council-session JSON
+  contract; Whale does not reinterpret those files as native Whale sessions.
+- `WEIPING_LAB` owns research-workbench artifacts. Paths or redacted summaries can be
+  handed over explicitly, but neither project is a runtime dependency of the other.
+- `WEIPING_WIKI` is the public route map and `AGENT_RESOURCE` is an optional shared
+  skill library. Whale remains usable without either checkout or any private local path.
+
 ## Upstream design references
 
 This release re-implements compatible patterns rather than copying source:

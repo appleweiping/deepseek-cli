@@ -1,11 +1,11 @@
 # 2026-06-04 UUPF DEEPSEEK_CLI Upgrade
 
-This repository was reviewed with Universal Upgrade Forge from
-`D:\AGENTIC_SCIENCE\uupf\UniversalUpgradeForge.zip`.
+This repository was reviewed with a local Universal Upgrade Forge checkout. The
+operator-specific tool location is deliberately not part of this public release.
 
 Local audit run:
 
-- `D:\AGENTIC_SCIENCE\.work\uupf_runs\deepseek-cli`
+- The run stayed in an ignored local audit work area.
 - 108 iteration records were generated from a Git archive snapshot to avoid
   copying `node_modules`, local sessions, logs, or config artifacts.
 - UUPF produced an offline upgrade plan; public repository changes were

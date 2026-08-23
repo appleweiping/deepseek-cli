@@ -39,11 +39,15 @@
   GHSA-52cp-r559-cp3m and GHSA-5p4m-2wfm-xmqj.
 - Upgraded the TypeScript build runner/toolchain, removed all remaining audited
   development vulnerabilities, and made the required Node.js 22.18 floor explicit.
+- Made the repository Windows launcher resolve its adjacent build or an installed
+  `wwhale` binary instead of depending on an operator-specific toolchain path.
+- Expanded the release scan to every packed file plus repository launchers, with a
+  mutation regression that rejects private absolute paths in packed release notes.
 
 ### Verification
 
 - `npm run typecheck`
-- `npm test` (build + 17 focused E2E suites + package install smoke + release scan)
+- `npm test` (build + 18 focused E2E suites + package install smoke + release scan)
 - `npm run audit:prod` (0 production vulnerabilities)
 - `npm audit --audit-level=low` (0 known vulnerabilities across all dependencies)
 

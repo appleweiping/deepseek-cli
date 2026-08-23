@@ -5,10 +5,17 @@ import { join, relative } from "node:path";
 
 const root = process.cwd();
 const releaseRoots = [
+  ".gitignore",
   "README.md",
+  "CHANGELOG.md",
+  "LICENSE",
   "config.toml",
   "package.json",
   "package-lock.json",
+  "tsconfig.json",
+  "bin",
+  "docs",
+  "prompts",
   "src",
   "scripts",
   "dist",
@@ -22,13 +29,20 @@ const blocked = [
   { code: "legacy-markdown-memory", pattern: /D:[\\/](research|Research)[\\/].*memory/i },
   { code: "legacy-session-dump", pattern: /memory[\\/]sessions/i },
   { code: "raw-secret-looking-key", pattern: /sk-[A-Za-z0-9_-]{12,}/ },
+  {
+    code: "absolute-private-windows-path",
+    pattern: /[A-Za-z]:[\\/](?:Users|Research|devtools|agent-resources|AGENT_RESOURCE|AGENTIC_SCIENCE)(?:[\\/]|$)/i,
+  },
+  { code: "absolute-private-posix-path", pattern: /\/(?:home|Users)\/[^/\s]+(?:\/|$)/ },
   { code: "stale-20kb-claim", pattern: new RegExp(`\\b${"20"}${"KB"}\\b`, "i") },
   { code: "stale-three-deps-claim", pattern: new RegExp(["three", "runtime", "dependencies"].join(" "), "i") },
   { code: "mirror-registry-lock", pattern: /registry\.npmmirror\.com/i },
 ];
 
 const failures = [];
-for (const file of listFiles(releaseRoots)) {
+const scannedFiles = listFiles(releaseRoots);
+const scannedFileSet = new Set(scannedFiles.map((file) => relative(root, file).replace(/\\/g, "/")));
+for (const file of scannedFiles) {
   const text = readFileSync(file, "utf-8");
   for (const rule of blocked) {
     if (rule.pattern.test(text)) {
@@ -39,7 +53,20 @@ for (const file of listFiles(releaseRoots)) {
 
 const packFiles = npmPackDryRunFiles();
 const packFileSet = new Set(packFiles);
-for (const expected of ["LICENSE", "README.md", "CHANGELOG.md", "config.toml", "package.json", "dist/index.js"]) {
+for (const packedFile of packFiles) {
+  if (!scannedFileSet.has(packedFile)) failures.push(`pack-file-not-scanned: ${packedFile}`);
+}
+for (const expected of [
+  "LICENSE",
+  "README.md",
+  "CHANGELOG.md",
+  "config.toml",
+  "package.json",
+  "dist/index.js",
+  "prompts/base.md",
+  "docs/releases/2026-06-04-uupf-deepseek-cli-upgrade.md",
+  "docs/releases/2026-08-23-context-trust-mcp-upgrade.md",
+]) {
   if (!packFileSet.has(expected)) failures.push(`pack-missing-required-file: ${expected}`);
 }
 for (const unexpected of packFiles) {
@@ -75,6 +102,10 @@ const packagedConfig = readFileSync(join(root, "config.toml"), "utf-8");
 for (const pattern of [/D:[\\/]/i, /agent-resources/i, /ARIS/i, /Vipin/i, /agent hub/i]) {
   if (pattern.test(packagedConfig)) failures.push(`packaged-config-private-reference: ${pattern}`);
 }
+
+const windowsLauncher = readFileSync(join(root, "bin", "deepseek.cmd"), "utf-8");
+if (!windowsLauncher.includes("%~dp0")) failures.push("windows-launcher-not-repo-relative");
+if (!/\bwhere\s+wwhale\b/i.test(windowsLauncher)) failures.push("windows-launcher-missing-npm-bin-fallback");
 
 validateReadmeLinks(packFileSet, failures);
 
