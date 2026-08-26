@@ -27,23 +27,24 @@ the official SDK, and can expose a localhost HTTP/SSE control surface.
 
 Requires Node.js 22.18 or newer.
 
-```bash
-npm install -g weiping-whale
-```
-
-Or run from source:
+The `weiping-whale` package is **not currently published to the npm registry**.
+Until a signed registry release exists, install the reviewed source tree and link
+the already-built package:
 
 ```bash
 git clone https://github.com/appleweiping/WEIPING_WHALE.git
 cd WEIPING_WHALE
 npm ci
 npm run build
-node dist/index.js --doctor
+npm link
+weiping-whale --version
 ```
 
-The CLI installs three binaries: `weiping-whale`, `wwhale`, and `deepseek` (a
-back-compat alias). State lives in `~/.weiping-whale/` (falling back to a legacy
-`~/.deepseek-cli/` if present, so existing sessions keep working).
+For a checkout-local verification, use `node dist/index.js --version` after the
+build and skip `npm link`. Linking exposes three binaries: `weiping-whale`, `wwhale`, and
+`deepseek` (a back-compat alias). State lives in `~/.weiping-whale/` (falling
+back to a legacy `~/.deepseek-cli/` if present, so existing sessions keep
+working).
 
 ## First Run
 

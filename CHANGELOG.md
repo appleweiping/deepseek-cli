@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.1 - Distribution honesty and immutable CI
+
+### Fixed
+
+- Replaced the non-functional npm-registry install claim with a tested
+  clone/build/link path while the package remains unpublished.
+- Kept authentication-dependent doctor diagnostics in First Run so the
+  unauthenticated installation sequence itself completes successfully.
+- Pinned every external GitHub Action to its official full commit SHA and
+  disabled checkout credential persistence.
+- Expanded the installed-tarball smoke test to execute all three declared bin
+  aliases and verify the installed manifest/runtime version agree.
+- Added release gates that reject floating action refs and common npm, pnpm,
+  Yarn, and Bun install/execute forms that would imply the unpublished package
+  is available from a public registry.
+
+### Verification
+
+- `npm run typecheck`
+- `npm test`
+- `npm pack --dry-run`
+- `npm run audit:prod`
+
+### Design references
+
+- Gemini CLI documents `npm link` as a production-like source workflow.
+  WEIPING_WHALE explicitly builds first because this package has no lifecycle
+  hook that compiles `dist/` during linking.
+- GitHub's Secure Use reference requires full-length action SHAs for immutable
+  workflow dependencies.
+
 ## 0.4.0 - Context, trust, and protocol hardening
 
 ### Added

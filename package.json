@@ -1,6 +1,6 @@
 {
   "name": "weiping-whale",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "WEIPING_WHALE — terminal-native DeepSeek coding agent with repo maps, hardened workspace boundaries, official MCP SDK, snapshots, sessions, routing, skills, sub-agents, LSP, cost tracking, and an optional HTTP/SSE API. Based on CodeWhale (MIT).",
   "type": "module",
   "main": "dist/index.js",

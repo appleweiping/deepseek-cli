@@ -67,7 +67,7 @@ function json(args, options) {
 try {
   const version = run(["--version"]);
   assert.equal(version.status, 0, version.error?.message || version.stderr || version.stdout);
-  assert.match(version.stdout, /0\.4\.0/);
+  assert.match(version.stdout, /0\.4\.1/);
 
   const doctor = json(["--doctor"]);
   assert.equal(doctor.ok, true);

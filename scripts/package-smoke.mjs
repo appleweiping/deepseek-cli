@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -36,12 +36,22 @@ try {
     "utf-8",
   );
 
+  const installedManifest = JSON.parse(
+    readFileSync(join(temp, "node_modules", "weiping-whale", "package.json"), "utf8"),
+  );
+  assert.equal(installedManifest.version, "0.4.1");
+
+  for (const name of ["weiping-whale", "wwhale", "deepseek"]) {
+    const bin = process.platform === "win32"
+      ? join(temp, "node_modules", ".bin", `${name}.cmd`)
+      : join(temp, "node_modules", ".bin", name);
+    const version = spawn(bin, ["--version"], { cwd: temp, shell: process.platform === "win32" });
+    assert.match(version.stdout, /0\.4\.1/);
+  }
+
   const bin = process.platform === "win32"
     ? join(temp, "node_modules", ".bin", "deepseek.cmd")
     : join(temp, "node_modules", ".bin", "deepseek");
-
-  const version = spawn(bin, ["--version"], { cwd: temp, shell: process.platform === "win32" });
-  assert.match(version.stdout, /0\.4\.0/);
 
   const doctor = spawn(bin, ["--json", "--doctor"], {
     cwd: temp,
@@ -52,7 +62,7 @@ try {
   assert.equal(payload.ok, true);
   assert.equal(payload.auth.api_key, "configured");
   assert.equal(payload.auth.source, "env:DEEPSEEK_API_KEY");
-  assert.equal(payload.version, "0.4.0");
+  assert.equal(payload.version, "0.4.1");
   assert.equal(payload.endpoint.host, "api.deepseek.com");
   assert.equal(payload.base_url, undefined);
 

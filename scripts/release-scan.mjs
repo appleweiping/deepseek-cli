@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import yaml from "js-yaml";
 
 const root = process.cwd();
 const releaseRoots = [
@@ -44,8 +45,12 @@ const scannedFiles = listFiles(releaseRoots);
 const scannedFileSet = new Set(scannedFiles.map((file) => relative(root, file).replace(/\\/g, "/")));
 for (const file of scannedFiles) {
   const text = readFileSync(file, "utf-8");
+  // Packed Markdown may contain JSON/JavaScript-escaped Windows paths. Scan a
+  // de-escaped view as well so `D:\\\\Research\\\\...` cannot bypass the same
+  // policy that rejects `D:\\Research\\...`.
+  const scanViews = [text, text.replace(/\\\\/g, "\\")];
   for (const rule of blocked) {
-    if (rule.pattern.test(text)) {
+    if (scanViews.some((view) => rule.pattern.test(view))) {
       failures.push(`${rule.code}: ${relative(root, file)}`);
     }
   }
@@ -66,6 +71,7 @@ for (const expected of [
   "prompts/base.md",
   "docs/releases/2026-06-04-uupf-deepseek-cli-upgrade.md",
   "docs/releases/2026-08-23-context-trust-mcp-upgrade.md",
+  "docs/releases/2026-08-27-distribution-ci-hardening.md",
 ]) {
   if (!packFileSet.has(expected)) failures.push(`pack-missing-required-file: ${expected}`);
 }
@@ -82,7 +88,7 @@ for (const [name, target] of Object.entries(packageJson.bin ?? {})) {
   const normalizedTarget = target.replace(/\\/g, "/").replace(/^\.\//, "");
   if (!packFileSet.has(normalizedTarget)) failures.push(`pack-bin-target-missing: ${name} -> ${target}`);
 }
-if (packageJson.version !== "0.4.0") failures.push(`package-version-mismatch: ${packageJson.version}`);
+if (packageJson.version !== "0.4.1") failures.push(`package-version-mismatch: ${packageJson.version}`);
 if (packageLock.version !== packageJson.version || lockRoot?.version !== packageJson.version) {
   failures.push(`package-lock-version-mismatch: package=${packageJson.version} lock=${packageLock.version} root=${lockRoot?.version}`);
 }
@@ -97,6 +103,7 @@ const ciWorkflow = readFileSync(join(root, ".github", "workflows", "ci.yml"), "u
 if (!/node-version:\s*['"]22\.18\.0['"]/.test(ciWorkflow)) failures.push("ci-does-not-test-minimum-node");
 if (!/os:\s*\[ubuntu-latest, windows-latest\]/.test(ciWorkflow)) failures.push("ci-platform-matrix-missing");
 if (!/\brun:\s*npm ci\b/.test(ciWorkflow)) failures.push("ci-does-not-use-npm-ci");
+validateWorkflowActions(ciWorkflow, failures);
 
 const packagedConfig = readFileSync(join(root, "config.toml"), "utf-8");
 for (const pattern of [/D:[\\/]/i, /agent-resources/i, /ARIS/i, /Vipin/i, /agent hub/i]) {
@@ -108,6 +115,18 @@ if (!windowsLauncher.includes("%~dp0")) failures.push("windows-launcher-not-repo
 if (!/\bwhere\s+wwhale\b/i.test(windowsLauncher)) failures.push("windows-launcher-missing-npm-bin-fallback");
 
 validateReadmeLinks(packFileSet, failures);
+
+const readme = readFileSync(join(root, "README.md"), "utf-8");
+if (!/not currently published to the npm registry/i.test(readme)) {
+  failures.push("readme-missing-unpublished-registry-boundary");
+}
+if (readmeClaimsRegistryInstall(readme)) {
+  failures.push("readme-claims-unpublished-registry-install");
+}
+const installSection = readme.match(/^## Install\s*$[\s\S]*?(?=^##\s)/m)?.[0] ?? "";
+if (/--doctor\b/.test(installSection)) {
+  failures.push("readme-install-runs-doctor-before-auth");
+}
 
 assert.deepEqual(failures, [], `Release scan failed:\n${failures.join("\n")}`);
 
@@ -137,6 +156,98 @@ function listFiles(entries) {
     if (/[\\\/](node_modules|assets|\.git)[\\\/]/.test(file)) return false;
     return relative(root, file) !== join("scripts", "release-scan.mjs");
   });
+}
+
+function validateWorkflowActions(source, failures) {
+  let workflow;
+  try {
+    workflow = yaml.load(source);
+  } catch (error) {
+    failures.push(`ci-yaml-invalid: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const jobs = workflow?.jobs;
+  if (!jobs || typeof jobs !== "object" || Array.isArray(jobs)) {
+    failures.push("ci-jobs-missing");
+    return;
+  }
+  const actionSteps = [];
+  for (const job of Object.values(jobs)) {
+    if (!job || typeof job !== "object" || Array.isArray(job)) continue;
+    if ("uses" in job) actionSteps.push(job);
+    if (Array.isArray(job.steps)) {
+      for (const step of job.steps) {
+        if (step && typeof step === "object" && !Array.isArray(step) && "uses" in step) {
+          actionSteps.push(step);
+        }
+      }
+    }
+  }
+  const checkoutSteps = [];
+  for (const step of actionSteps) {
+    const uses = step.uses;
+    if (typeof uses !== "string") {
+      failures.push("ci-action-uses-must-be-string");
+      continue;
+    }
+    if (uses.startsWith("./")) continue;
+    if (!/^[^@\s]+@[0-9a-f]{40}$/.test(uses)) {
+      failures.push(`ci-action-not-full-sha: ${uses}`);
+    }
+    if (uses.toLowerCase().startsWith("actions/checkout@")) checkoutSteps.push(step);
+  }
+  if (checkoutSteps.length === 0) failures.push("ci-checkout-step-missing");
+  for (const step of checkoutSteps) {
+    if (step.with?.["persist-credentials"] !== false) {
+      failures.push("ci-checkout-persists-credentials");
+    }
+  }
+}
+
+function readmeClaimsRegistryInstall(source) {
+  const logicalLines = source
+    .replace(/\\\r?\n\s*/g, " ")
+    .replace(/`\r?\n\s*/g, " ")
+    .split(/\r?\n/);
+  for (const rawLine of logicalLines) {
+    const line = rawLine.replace(/\s+#.*$/, "").trim();
+    const tokens = (line.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? []).map((token) =>
+      token.replace(/^['"]|['"]$/g, "").replace(/[;,]$/, "").toLowerCase()
+    );
+    const clientIndex = tokens.findIndex((token) =>
+      [
+        "npm", "npm.cmd", "npm.exe",
+        "npx", "npx.cmd", "npx.exe",
+        "pnpm", "pnpm.cmd", "pnpm.exe", "pnpx",
+        "yarn", "yarn.cmd", "yarn.exe",
+        "bun", "bun.exe", "bunx", "bunx.exe",
+      ].includes(token)
+    );
+    if (clientIndex < 0) continue;
+    const client = tokens[clientIndex].replace(/(?:\.cmd|\.exe)$/i, "");
+    const command = tokens.slice(clientIndex + 1);
+    const installs = command.some((token) => ["install", "i", "add"].includes(token));
+    const global = command.some((token, index) =>
+      token === "-g" ||
+      token === "--global" ||
+      /^(?:-g|--global)=(?:true|1|yes|on)$/.test(token) ||
+      token === "--location=global" ||
+      (token === "--location" && command[index + 1] === "global")
+    );
+    const packageName = command.some((token) =>
+      token === "weiping-whale" ||
+      token.startsWith("weiping-whale@") ||
+      /^(?:--package|-p)=weiping-whale(?:@|$)/.test(token)
+    );
+    const executes =
+      ["npx", "pnpx", "bunx"].includes(client) ||
+      (["npm", "pnpm"].includes(client) && command.some((token) => ["exec", "x", "dlx"].includes(token))) ||
+      (client === "yarn" && command.some((token) => token === "dlx")) ||
+      (client === "bun" && command.some((token) => token === "x"));
+    const yarnGlobalAdd = client === "yarn" && command[0] === "global" && command.includes("add");
+    if (packageName && ((installs && global) || yarnGlobalAdd || executes)) return true;
+  }
+  return false;
 }
 
 function walk(dir, files) {
